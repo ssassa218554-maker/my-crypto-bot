@@ -14,10 +14,8 @@ st.set_page_config(page_title="동탄 코인 비서 PRO", layout="wide")
 KST = timezone(timedelta(hours=9))
 now = datetime.now(KST)
 
-# 알림 기록을 저장할 리스트 초기화 (앱이 켜져 있는 동안 유지)
 if 'alert_log' not in st.session_state:
     st.session_state['alert_log'] = []
-
 if 'last_alert' not in st.session_state:
     st.session_state['last_alert'] = {}
 
@@ -29,9 +27,7 @@ except:
     st.error("Secrets 설정을 확인해주세요!")
     st.stop()
 
-# 알림을 보내고 기록하는 함수
 def send_and_log_alert(coin, message):
-    # 텔레그램 전송
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     params = {"chat_id": CHAT_ID, "text": message}
     try:
@@ -39,23 +35,14 @@ def send_and_log_alert(coin, message):
     except:
         pass
     
-    # 히스토리에 기록 추가 (시간, 코인, 내용)
     log_entry = {
         "시간": datetime.now(KST).strftime('%H:%M:%S'),
         "코인": coin,
-        "알림 내용": message.split('\n')[0] # 첫 줄만 깔끔하게 저장
+        "알림 내용": message
     }
-    # 최신 알림이 맨 위로 오게 추가
     st.session_state['alert_log'].insert(0, log_entry)
-    # 너무 많아지면 성능을 위해 최근 50개만 유지
     if len(st.session_state['alert_log']) > 50:
         st.session_state['alert_log'].pop()
-
-# 2. 메인 화면
-st.title("🚀 실시간 암호화폐 PRO 관제센터")
-st.write(f"현재 한국 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-
-coin_list = ["KRW-BTC", "KRW-ETH", "KRW-SOL"]
 
 # 스토캐스틱 계산 함수
 def get_stochastic(df, n, m, t):
@@ -65,13 +52,19 @@ def get_stochastic(df, n, m, t):
     d = k.rolling(window=m).mean()
     return k, d
 
-# 3. 데이터 분석 및 차트 (코인별 반복)
+# 2. 메인 화면
+st.title("🚀 실시간 암호화폐 PRO 관제센터")
+st.write(f"현재 한국 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+coin_list = ["KRW-BTC", "KRW-ETH", "KRW-SOL"]
+
+# 3. 데이터 분석 및 코인별 차트 생성
 for coin in coin_list:
     df = pyupbit.get_ohlcv(coin, interval="minute5", count=200)
     if df is None: continue
     current_price = pyupbit.get_current_price(coin)
 
-    # 지표 계산 (MA, RSI, Stochastic 5/10/20)
+    # 지표 계산
     df['ma5'] = df['close'].rolling(window=5).mean()
     df['ma20'] = df['close'].rolling(window=20).mean()
     
@@ -84,39 +77,63 @@ for coin in coin_list:
     df['k10'], df['d6'] = get_stochastic(df, 10, 6, 6)
     df['k20'], df['d12'] = get_stochastic(df, 20, 12, 12)
 
-    # 차트 그리기 (생략 - 기존 코드와 동일)
-    # ... (Plotly 코드) ...
-    st.plotly_chart(go.Figure(...)) # 실제 코드에는 이전의 5단 차트가 들어갑니다.
+    st.markdown(f"### 💎 {coin}")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("현재가", f"{current_price:,.0f}원")
+    m2.metric("RSI", f"{df['rsi'].iloc[-1]:.2f}")
+    m3.metric("Stoch(5,3)", f"{df['k5'].iloc[-1]:.1f}")
 
-    # --- 실시간 알림 로직 ---
+    # 5단 통합 차트
+    fig = make_subplots(rows=5, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.02, 
+                        row_heights=[0.4, 0.15, 0.15, 0.15, 0.15],
+                        subplot_titles=("가격 & 이평선", "RSI", "Stoch(5,3,3)", "Stoch(10,6,6)", "Stoch(20,12,12)"))
+
+    fig.add_trace(go.Candlestick(x=df.index, open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Price"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['ma5'], name="MA5", line=dict(color='orange', width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['ma20'], name="MA20", line=dict(color='red', width=1)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['rsi'], name="RSI", line=dict(color='purple')), row=2, col=1)
+    
+    fig.add_trace(go.Scatter(x=df.index, y=df['k5'], name="K5", line=dict(color='blue')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['d3'], name="D3", line=dict(color='orange', dash='dot')), row=3, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['k10'], name="K10", line=dict(color='blue')), row=4, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['d6'], name="D6", line=dict(color='orange', dash='dot')), row=4, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['k20'], name="K20", line=dict(color='blue')), row=5, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['d12'], name="D12", line=dict(color='orange', dash='dot')), row=5, col=1)
+
+    fig.update_layout(height=1200, xaxis_rangeslider_visible=False, showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 실시간 알림 로직
     curr_ma5, prev_ma5 = df['ma5'].iloc[-1], df['ma5'].iloc[-2]
     curr_ma20, prev_ma20 = df['ma20'].iloc[-1], df['ma20'].iloc[-2]
-    curr_rsi = df['rsi'].iloc[-1]
-
+    
     alert_msg = ""
     if prev_ma5 < prev_ma20 and curr_ma5 > curr_ma20:
-        alert_msg = f"✨ [골든크로스] {coin} 상승 추세 전환!"
+        alert_msg = f"✨ [{coin}] 골든크로스 발생!"
     elif prev_ma5 > prev_ma20 and curr_ma5 < curr_ma20:
-        alert_msg = f"💀 [데드크로스] {coin} 하락 주의!"
-    elif curr_rsi <= 25:
-        alert_msg = f"📉 [과매도] {coin} RSI {curr_rsi:.1f} 바닥권"
-    elif curr_rsi >= 75:
-        alert_msg = f"📈 [과매수] {coin} RSI {curr_rsi:.1f} 천장권"
-
-    # 알림 발송 및 기록
+        alert_msg = f"💀 [{coin}] 데드크로스 경고!"
+    
     if alert_msg and st.session_state['last_alert'].get(coin) != alert_msg:
         send_and_log_alert(coin, alert_msg)
         st.session_state['last_alert'][coin] = alert_msg
 
     st.divider()
 
-# 4. [신규] 하단 알림 히스토리 섹션
-st.subheader("📋 최근 알림 기록 (실시간 로그)")
+# 4. 정기 브리핑 (오후 5시 등)
+report_hours = [9, 13, 17, 21]
+if now.hour in report_hours and now.minute == 0:
+    if st.session_state.get('last_report_hour') != now.hour:
+        report_msg = f"🔔 [동탄 비서 {now.hour}시 정기 보고]\n비트코인: {pyupbit.get_current_price('KRW-BTC'):,.0f}원"
+        send_and_log_alert("전체", report_msg)
+        st.session_state['last_report_hour'] = now.hour
+
+# 5. 하단 알림 기록 표
+st.subheader("📋 최근 알림 기록")
 if st.session_state['alert_log']:
-    log_df = pd.DataFrame(st.session_state['alert_log'])
-    st.table(log_df) # 깔끔한 표 형태로 출력
+    st.table(pd.DataFrame(st.session_state['alert_log']))
 else:
-    st.write("아직 발생한 알림이 없습니다. 감시 중...")
+    st.write("아직 알림 기록이 없습니다.")
 
 time.sleep(60)
 st.rerun()
