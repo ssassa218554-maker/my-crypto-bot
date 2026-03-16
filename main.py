@@ -3,10 +3,14 @@ import pyupbit
 import pandas as pd
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # 1. 페이지 설정
 st.set_page_config(page_title="동탄 비트코인 비서", layout="centered")
+
+# --- 한국 시간(KST) 설정 ---
+KST = timezone(timedelta(hours=9))
+now = datetime.now(KST) # 이제 서버가 어디있든 한국 시간을 가져옵니다.
 
 # --- 텔레그램 설정 ---
 try:
@@ -19,14 +23,11 @@ except:
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     params = {"chat_id": CHAT_ID, "text": message}
-    try:
-        requests.get(url, params=params)
-    except Exception as e:
-        st.error(f"메시지 전송 실패: {e}")
+    requests.get(url, params=params)
 
 # 2. 화면 구성
 st.title("🚀 실시간 비트코인 대시보드")
-st.write(f"현재 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+st.write(f"현재 한국 시간: {now.strftime('%Y-%m-%d %H:%M:%S')}")
 
 # 3. 데이터 가져오기
 df = pyupbit.get_ohlcv("KRW-BTC", interval="minute5", count=50)
@@ -52,29 +53,28 @@ with col2:
 
 st.line_chart(df['close'])
 
-# 5. [신규] 시간별 정기 브리핑 로직
-# 지정된 시간(시) 목록
+# 5. 한국 시간 기준 정기 브리핑 (9, 13, 17, 21시)
 report_hours = [9, 13, 17, 21]
-current_hour = datetime.now().hour
-current_minute = datetime.now().minute
+current_hour = now.hour
+current_minute = now.minute
 
-# 정각(0분)에 해당 시간대라면 알림 전송 (중복 방지를 위해 세션 상태 활용)
 if 'last_report_hour' not in st.session_state:
     st.session_state['last_report_hour'] = -1
 
+# 정각(0분)에 알림 전송
 if current_hour in report_hours and current_minute == 0:
     if st.session_state['last_report_hour'] != current_hour:
-        msg = f"🔔 [정기 브리핑]\n현재 시간: {current_hour}시 정각\n비트코인 가격: {current_price:,.0f}원\nRSI: {now_rsi:.2f}"
+        msg = f"🔔 [동탄 비서 정기 알림]\n현재 한국 시간: {current_hour}시 정각\n비트코인 가격: {current_price:,.0f}원\nRSI: {now_rsi:.2f}"
         send_telegram(msg)
         st.session_state['last_report_hour'] = current_hour
-        st.success(f"{current_hour}시 정기 알림 전송 완료!")
+        st.success(f"한국 시간 {current_hour}시 알림을 보냈습니다!")
 
-# 6. 실시간 RSI 알림 로직 (기존)
+# 6. 실시간 RSI 알림 로직
 if now_rsi <= 30:
-    st.warning("⚠️ 과매도 구간 알림 발송")
+    st.warning("⚠️ 과매도 구간입니다. (매수 검토)")
 elif now_rsi >= 70:
-    st.success("⚠️ 과매수 구간 알림 발송")
+    st.success("⚠️ 과매수 구간입니다. (매도 검토)")
 
-# 화면 자동 새로고침 (1분마다)
+# 1분마다 자동 새로고침
 time.sleep(60)
 st.rerun()
